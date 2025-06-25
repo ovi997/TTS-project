@@ -27,12 +27,16 @@ class MultiOptimizer:
             except:
                 print("Unloaded %s" % key)
 
+    def step(self, key=None, scaler=None):
+        keys = [key] if key is not None else self.keys
+        _ = [self._step(key, scaler) for key in keys]
 
-    def step(self, key=None):
-        if key is not None:
-            self.optimizers[key].step()
+    def _step(self, key, scaler=None):
+        if scaler is not None:
+            scaler.step(self.optimizers[key])
+            scaler.update()
         else:
-            _ = [self.optimizers[key].step() for key in self.keys]
+            self.optimizers[key].step()
 
     def zero_grad(self, key=None):
         if key is not None:
@@ -46,40 +50,23 @@ class MultiOptimizer:
         else:
             _ = [self.schedulers[key].step(*args) for key in self.keys]
 
-
-def build_optimizer(parameters):
-    optimizer, scheduler = _define_optimizer(parameters)
-    return optimizer, scheduler
-
-def _define_optimizer(params):
-    optimizer_params = params['optimizer_params']
-    sch_params = params['scheduler_params']
-    optimizer = AdamW(
-        params['params'],
-        lr=optimizer_params.get('lr', 1e-4),
-        weight_decay=optimizer_params.get('weight_decay', 5e-4),
-        betas=(0.9, 0.98),
-        eps=1e-9)
-    scheduler = _define_scheduler(optimizer, sch_params)
-    return optimizer, scheduler
-
-def _define_scheduler(optimizer, params):
-    print(params)
+def define_scheduler(optimizer, params):
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
-        max_lr=params.get('max_lr', 5e-4),
+        max_lr=params.get('max_lr', 2e-4),
         epochs=params.get('epochs', 200),
         steps_per_epoch=params.get('steps_per_epoch', 1000),
         pct_start=params.get('pct_start', 0.0),
-        final_div_factor=5)
+        div_factor=1,
+        final_div_factor=1)
 
     return scheduler
 
-def build_multi_optimizer(parameters_dict, scheduler_params):
-    optim = dict([(key, AdamW(params, lr=1e-4, weight_decay=1e-6, betas=(0.9, 0.98), eps=1e-9))
+def build_optimizer(parameters_dict, scheduler_params_dict, lr):
+    optim = dict([(key, AdamW(params, lr=lr, weight_decay=1e-4, betas=(0.0, 0.99), eps=1e-9))
                    for key, params in parameters_dict.items()])
 
-    schedulers = dict([(key, _define_scheduler(opt, scheduler_params)) \
+    schedulers = dict([(key, define_scheduler(opt, scheduler_params_dict[key])) \
                        for key, opt in optim.items()])
 
     multi_optim = MultiOptimizer(optim, schedulers)
